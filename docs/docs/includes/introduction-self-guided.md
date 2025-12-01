@@ -96,7 +96,7 @@ The script `deploy.sh` deploys to the `westus` region by default; edit the file 
     cd infra
  
     # Make the script executable if you get "permission denied"
-    # chmod 755 sets explicit permissions):
+    # chmod 755 sets explicit permissions:
     chmod 755 deploy.sh
 
     # Then run the deploy script
