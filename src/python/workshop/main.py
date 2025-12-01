@@ -1,5 +1,16 @@
 import asyncio
 import logging
+import os
+
+# Disable managed identity in Codespaces to force user authentication via Azure CLI
+# This must be done BEFORE importing Azure SDK modules
+if os.path.exists('/.dockerenv') or os.getenv('CODESPACES') == 'true':
+    # Disable all managed identity endpoints
+    os.environ['AZURE_POD_IDENTITY_AUTHORITY_HOST'] = ''
+    os.environ['IDENTITY_ENDPOINT'] = ''
+    os.environ['IDENTITY_HEADER'] = ''
+    os.environ['IDENTITY_SERVER_THUMBPRINT'] = ''
+    os.environ['IMDS_ENDPOINT'] = ''
 
 from azure.ai.agents.aio import AgentsClient
 from azure.ai.agents.models import (
@@ -30,10 +41,33 @@ utilities = Utilities()
 sales_data = SalesData(utilities)
 
 
+# Auto-detect environment and choose appropriate credential
+# In GitHub Codespaces: Disables managed identity and uses Azure CLI (requires 'az login')
+# On local IDE: Uses DefaultAzureCredential (tries VS Code, CLI, interactive, etc.)
+def get_credential():
+    is_container = os.path.exists('/.dockerenv')
+    is_codespace = os.getenv('CODESPACES') == 'true'
+    
+    if is_container or is_codespace:
+        print("Running in container/Codespace - using DefaultAzureCredential with managed identity disabled.")
+        print("Please ensure you've run 'az login' to authenticate with your Azure account.")
+        # Managed identity is already disabled via environment variables above
+        credential = DefaultAzureCredential()
+        print(f"Credential type: {type(credential).__name__}")
+        return credential
+    else:
+        print("Running in local IDE - using DefaultAzureCredential.")
+        credential = DefaultAzureCredential()
+        print(f"Credential type: {type(credential).__name__}")
+        return credential
+
+
+print("Initializing agents client...")
 agents_client = AgentsClient(
-    credential=DefaultAzureCredential(),
+    credential=get_credential(),
     endpoint=Config.PROJECT_ENDPOINT,
 )
+print("Agents client initialized.")
 
 functions = AsyncFunctionTool(
     {
@@ -120,8 +154,24 @@ async def initialize() -> tuple[Agent | None, AgentThread | None]:
         return agent, thread
 
     except Exception as e:
-        logger.error("An error occurred initializing the agent: %s", str(e))
-        logger.error("Please ensure you've enabled an instructions file.")
+        error_message = str(e)
+        print(f"\n{tc.BG_BRIGHT_RED}ERROR:{tc.RESET} {error_message}\n")
+        logger.error("An error occurred initializing the agent: %s", error_message)
+        
+        # Provide specific guidance based on the error type
+        if "PermissionDenied" in error_message or "lacks the required data action" in error_message:
+            if os.getenv('CODESPACES') == 'true':
+                print(f"{tc.YELLOW}→ Permission error: Please ensure you've run 'az login' and authenticated with your Azure account.{tc.RESET}")
+                print(f"{tc.YELLOW}→ Your Azure account needs 'Cognitive Services User' or 'Cognitive Services OpenAI User'{tc.RESET}")
+                print(f"{tc.YELLOW}  role on the Azure AI project. You can grant yourself this role in the Azure Portal.{tc.RESET}")
+                print(f"{tc.YELLOW}→ See: https://learn.microsoft.com/azure/ai-services/openai/how-to/role-based-access-control{tc.RESET}")
+            else:
+                print(f"{tc.YELLOW}→ Authentication error: Please ensure you're authenticated with Azure (try 'az login').{tc.RESET}")
+        elif "INSTRUCTIONS_FILE" in error_message:
+            print(f"{tc.YELLOW}→ Please ensure you've enabled an instructions file.{tc.RESET}")
+        else:
+            print(f"{tc.YELLOW}→ Check your configuration and ensure all required environment variables are set.{tc.RESET}")
+        
         return None, None
 
 
@@ -169,7 +219,7 @@ async def main() -> None:
     async with agents_client:
         agent, thread = await initialize()
         if not agent or not thread:
-            print(f"{tc.BG_BRIGHT_RED}Initialization failed. Ensure you have uncommented the instructions file for the lab.{tc.RESET}")
+            print(f"{tc.BG_BRIGHT_RED}Initialization failed. Check the error messages above for details.{tc.RESET}")
             print("Exiting...")
             return
 
