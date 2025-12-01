@@ -4,13 +4,19 @@ import os
 
 # Disable managed identity in Codespaces to force user authentication via Azure CLI
 # This must be done BEFORE importing Azure SDK modules
-if os.path.exists('/.dockerenv') or os.getenv('CODESPACES') == 'true':
+def is_container_environment() -> bool:
+    return os.path.exists('/.dockerenv') or os.getenv('CODESPACES') == 'true'
+
+if is_container_environment():
     # Disable all managed identity endpoints
-    os.environ['AZURE_POD_IDENTITY_AUTHORITY_HOST'] = ''
-    os.environ['IDENTITY_ENDPOINT'] = ''
-    os.environ['IDENTITY_HEADER'] = ''
-    os.environ['IDENTITY_SERVER_THUMBPRINT'] = ''
-    os.environ['IMDS_ENDPOINT'] = ''
+    for key in [
+        'AZURE_POD_IDENTITY_AUTHORITY_HOST',
+        'IDENTITY_ENDPOINT',
+        'IDENTITY_HEADER',
+        'IDENTITY_SERVER_THUMBPRINT',
+        'IMDS_ENDPOINT',
+    ]:
+        os.environ.pop(key, None)
 
 from azure.ai.agents.aio import AgentsClient
 from azure.ai.agents.models import (
@@ -29,6 +35,7 @@ from sales_data import SalesData
 from stream_event_handler import StreamEventHandler
 from terminal_colors import TerminalColors as tc
 from utilities import Utilities
+from azure.identity.aio import AzureCliCredential
 
 logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
@@ -49,10 +56,10 @@ def get_credential():
     is_codespace = os.getenv('CODESPACES') == 'true'
     
     if is_container or is_codespace:
-        print("Running in container/Codespace - using DefaultAzureCredential with managed identity disabled.")
+        print("Running in container/Codespace - using AzureCliCredential with managed identity disabled.")
         print("Please ensure you've run 'az login' to authenticate with your Azure account.")
         # Managed identity is already disabled via environment variables above
-        credential = DefaultAzureCredential()
+        credential = AzureCliCredential()
         print(f"Credential type: {type(credential).__name__}")
         return credential
     else:
@@ -60,7 +67,6 @@ def get_credential():
         credential = DefaultAzureCredential()
         print(f"Credential type: {type(credential).__name__}")
         return credential
-
 
 print("Initializing agents client...")
 agents_client = AgentsClient(
